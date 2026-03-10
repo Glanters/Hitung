@@ -10,13 +10,13 @@ const workerScript = `
         
         if (type === 'PROCESS') {
                     try {
-                        const { bufferA, bufferB } = payload;
+                        const { buffersA, buffersB } = payload;
                         
                         self.postMessage({ type: 'PROGRESS', payload: { percent: 10, text: 'Reading Workbook A...' } });
-                        const rawA = readExcel(bufferA);
+                        const rawA = readAllExcel(buffersA);
                         
                         self.postMessage({ type: 'PROGRESS', payload: { percent: 30, text: 'Reading Workbook B...' } });
-                        const rawB = readExcel(bufferB);
+                        const rawB = readAllExcel(buffersB);
                         
                         self.postMessage({ type: 'PROGRESS', payload: { percent: 50, text: 'Mapping Data Structure...' } });
                         const headersA = rawA[0].map(h => String(h || '').toLowerCase());
@@ -30,7 +30,7 @@ const workerScript = `
                         self.postMessage({ type: 'PROGRESS', payload: { percent: 90, text: 'Finalizing Reconciliation...' } });
                         const result = reconcileDataMap(mapA, mapB);
                         
-                        self.postMessage({ type: 'PROGRESS', payload: { percent: 90, text: 'Calculating Statistics...' } });
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 95, text: 'Calculating Statistics...' } });
                         const stats = calculateStats(result);
                         
                         self.postMessage({ type: 'DONE', payload: { data: result, stats: stats } });
@@ -90,6 +90,27 @@ const workerScript = `
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
                 return XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            }
+
+            function readAllExcel(buffers) {
+                let allRows = [];
+                let headers = null;
+                
+                buffers.forEach((buffer, index) => {
+                    const rows = readExcel(buffer);
+                    if (rows.length > 0) {
+                        if (index === 0) {
+                            headers = rows[0]; // Keep first file headers
+                            allRows = rows;
+                        } else {
+                            // Append only data rows (skip header of subsequent files)
+                            // Assumption: All files have same structure
+                            allRows = allRows.concat(rows.slice(1));
+                        }
+                    }
+                });
+                
+                return allRows;
             }
 
             function reconcileDataMap(mapA, mapB) {
@@ -245,7 +266,7 @@ function dashboard() {
         sortAsc: true,
         data: [],
                 statsData: null, // Cache for stats
-                files: { A: null, B: null },
+                files: { A: [], B: [] }, // Changed to array for multiple files
         processing: false,
         progress: 0,
         progressText: '',
@@ -282,12 +303,26 @@ function dashboard() {
 
         handleFileUpload(event, type) {
             this.error = null;
-            const file = event.target.files[0];
-            if (file) this.files[type] = file;
+            // Handle multiple files
+            const newFiles = Array.from(event.target.files);
+            if (newFiles.length > 0) {
+                // If previously null or empty, init array
+                if (!this.files[type]) this.files[type] = [];
+                
+                // Append new files
+                this.files[type] = [...this.files[type], ...newFiles];
+            }
+        },
+        
+        getFileLabel(type) {
+            const files = this.files[type];
+            if (!files || files.length === 0) return 'Drag & drop or click to upload';
+            if (files.length === 1) return files[0].name;
+            return `${files.length} files selected`;
         },
 
         processFiles() {
-            if (!this.files.A || !this.files.B) return;
+            if (!this.files.A || this.files.A.length === 0 || !this.files.B || this.files.B.length === 0) return;
             
             this.processing = true;
             this.error = null;
@@ -295,18 +330,29 @@ function dashboard() {
             this.progressText = 'Starting...';
             this.data = [];
 
-            // Read files as ArrayBuffer to pass to worker
-            const readerA = new FileReader();
-            const readerB = new FileReader();
+            // Read all files as ArrayBuffers
+            const readAllFiles = (fileList) => {
+                return Promise.all(fileList.map(file => {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = e => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                }));
+            };
 
             Promise.all([
-                new Promise(resolve => { readerA.onload = e => resolve(e.target.result); readerA.readAsArrayBuffer(this.files.A); }),
-                new Promise(resolve => { readerB.onload = e => resolve(e.target.result); readerB.readAsArrayBuffer(this.files.B); })
-            ]).then(([bufferA, bufferB]) => {
+                readAllFiles(this.files.A),
+                readAllFiles(this.files.B)
+            ]).then(([buffersA, buffersB]) => {
+                // Flatten transferables list
+                const transferables = [...buffersA, ...buffersB];
+                
                 this.worker.postMessage({
                     type: 'PROCESS',
-                    payload: { bufferA, bufferB }
-                }, [bufferA, bufferB]); // Transferables for performance
+                    payload: { buffersA, buffersB } // Send array of buffers
+                }, transferables); 
             }).catch(err => {
                 this.error = "Failed to read files: " + err.message;
                 this.processing = false;
@@ -446,8 +492,48 @@ function dashboard() {
         },
         
         generateMockData() {
-                // Simplified mock for demo
-                alert("Mock data disabled in optimized mode. Please upload files.");
-        }
+                     // Simplified mock for demo
+                     alert("Mock data disabled in optimized mode. Please upload files.");
+                },
+
+                exportData(type) {
+                    if (this.data.length === 0) {
+                        alert("No data to export.");
+                        return;
+                    }
+
+                    let exportList = [];
+                    let fileName = "Reconciliation_Report.xlsx";
+
+                    if (type === 'mismatch') {
+                        exportList = this.data.filter(row => this.getStatus(row) === 'mismatch');
+                        fileName = "Reconciliation_Mismatch.xlsx";
+                    } else if (type === 'missing') {
+                        exportList = this.data.filter(row => {
+                            const s = this.getStatus(row);
+                            return s === 'missing_a' || s === 'missing_b';
+                        });
+                        fileName = "Reconciliation_Missing.xlsx";
+                    } else {
+                        exportList = this.data;
+                    }
+
+                    const rows = exportList.map(row => ({
+                        'Unique ID': row.id,
+                        'Date (A)': row.a ? row.a.date : '-',
+                        'Description (A)': row.a ? row.a.desc : '-',
+                        'Amount (A)': row.a ? row.a.amount : 0,
+                        'Date (B)': row.b ? row.b.date : '-',
+                        'Description (B)': row.b ? row.b.desc : '-',
+                        'Amount (B)': row.b ? row.b.amount : 0,
+                        'Variance': this.getVariance(row),
+                        'Status': this.getStatusLabel(row)
+                    }));
+
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Data");
+                    XLSX.writeFile(wb, fileName);
+                }
     }
 }
