@@ -98,43 +98,125 @@ const workerScript = `
             }
 
     function mapRows(rows, headers, sourceName) {
-        const map = new Map();
-        
-        const idxId = headers.findIndex(h => h.includes('id') || h.includes('ref') || h.includes('trx') || h.includes('code') || h.includes('nomor') || h.includes('unique'));
-        const idxDate = headers.findIndex(h => h.includes('date') || h.includes('tanggal') || h.includes('waktu') || h.includes('time'));
-        const idxDesc = headers.findIndex(h => h.includes('desc') || h.includes('ket') || h.includes('uraian') || h.includes('detail') || h.includes('name') || h.includes('nama'));
-        const idxAmount = headers.findIndex(h => h.includes('amount') || h.includes('nominal') || h.includes('nilai') || h.includes('total') || h.includes('jumlah') || h.includes('harga') || h.includes('bayar'));
+                const map = new Map();
+                
+                // --- Column Mapping Strategy ---
+                // ID Column (Critical)
+                // A (QRIS): order_id
+                // B (Admin): "Nomor Rekening Pembayar" OR "order_id" (fallback)
+                const idxId = headers.findIndex(h => {
+                    const val = h.toLowerCase().trim();
+                    if (sourceName === 'A') return val === 'order_id' || val.includes('order id');
+                    if (sourceName === 'B') return val.includes('nomor rekening') || val.includes('rekening pembayar') || val === 'order_id' || val.includes('order id');
+                    return false;
+                });
+                
+                // Date Column
+                // A: paid_at
+                // B: paid_at
+                const idxDate = headers.findIndex(h => {
+                     const val = h.toLowerCase().trim();
+                     return val === 'paid_at' || val.includes('tanggal') || val.includes('waktu');
+                });
 
-        let finalId = idxId !== -1 ? idxId : 0;
-        let finalDate = idxDate !== -1 ? idxDate : 1;
-        let finalDesc = idxDesc !== -1 ? idxDesc : 2;
-        let finalAmount = idxAmount !== -1 ? idxAmount : (headers.length > 3 ? 3 : headers.length - 1);
+                // Desc Column
+                // A: rrn / paid_by / payment_method
+                // B: rrn / paid_by
+                const idxDesc = headers.findIndex(h => {
+                    const val = h.toLowerCase().trim();
+                    return val === 'rrn' || val.includes('keterangan') || val.includes('desc');
+                });
 
-        rows.forEach(row => {
-            if (!row || row.length === 0) return;
-            
-            const id = String(row[finalId] || '').trim();
-            if (!id || id.toLowerCase() === 'total' || id.toLowerCase() === 'grand total') return;
+                // Amount Column (Nominal)
+                // A: amount / total ? (User data shows amount 150,000 and total 148,350 (net)). 
+                // Usually reconciliation is on GROSS amount before fee, or NET?
+                // Let's look for 'amount' first, then 'total' if amount not found.
+                // User input: "amount 150,000.00"
+                const idxAmount = headers.findIndex(h => {
+                    const val = h.toLowerCase().trim();
+                    return val === 'amount' || val === 'nominal' || val === 'jumlah';
+                });
 
-            let amount = row[finalAmount];
-            if (typeof amount === 'string') {
-                amount = parseFloat(amount.replace(/[^0-9.-]+/g,""));
+                // Fallbacks
+                let finalId = idxId;
+                let finalDate = idxDate !== -1 ? idxDate : 1; // Default to col 1
+                let finalDesc = idxDesc !== -1 ? idxDesc : 2; // Default to col 2
+                let finalAmount = idxAmount;
+
+                // If ID not found by name, try heuristics or defaults
+                if (finalId === -1) {
+                     // Try to find column with long numeric strings?
+                     // For now default to 3 (order_id usually around col 3 or 4 based on user example)
+                     // User example: name, name, type, order_id (col 3)
+                     finalId = 3; 
+                }
+                
+                if (finalAmount === -1) {
+                    // User example: amount is col 5
+                    finalAmount = 5;
+                }
+
+                // console.log("Mapping " + sourceName + ": ID=" + finalId + ", Date=" + finalDate + ", Desc=" + finalDesc + ", Amount=" + finalAmount);
+
+                rows.forEach(row => {
+                    if (!row || row.length === 0) return;
+                    
+                    // ID Cleaning
+                    // User Example: "24499114_1772806349597"
+                    // Sometimes Excel might read it as number if no underscores.
+                    let id = String(row[finalId] || '').trim();
+                    
+                    // If ID is empty or header-like, skip
+                if (!id || id.toLowerCase() === 'order_id' || id.toLowerCase() === 'total') return;
+
+                // Handle duplicates: if ID already exists, append suffix or log?
+                // For now, let's keep the last one or maybe append if user wants to see duplicates?
+                // But reconciliation usually requires 1-to-1.
+                // If we have duplicates in source, we might miss them.
+                // Let's just use the ID as is.
+                
+                // Amount Cleaning
+                    // User Example: "150,000.00" (String with comma thousands, dot decimal)
+                    let amount = row[finalAmount];
+                    if (typeof amount === 'string') {
+                        // Remove "Rp", spaces
+                        let clean = amount.replace(/[Rp\s]/g, '');
+                        // Handle "150,000.00" -> 150000.00
+                        // Remove commas
+                        clean = clean.replace(/,/g, '');
+                        amount = parseFloat(clean);
+                    }
+                    
+                    if (amount === undefined || amount === null || isNaN(amount)) amount = 0;
+
+                    // Date Cleaning
+                    // User Example: "3/7/2026 0:01"
+                    let date = row[finalDate];
+                    if (typeof date === 'number') {
+                         // Excel serial date
+                         const dateObj = new Date(Math.round((date - 25569)*86400*1000));
+                         try { date = dateObj.toISOString().split('T')[0]; } catch(e) { date = 'Invalid Date'; }
+                    } else {
+                        // "3/7/2026 0:01" -> try parse
+                        date = String(date || '');
+                        // If needed, format to YYYY-MM-DD for consistency
+                    }
+
+                    // Desc
+                    const desc = String(row[finalDesc] || '');
+
+                    // Map Key: ID
+                    // Handle duplicates? If multiple rows have same ID, usually we sum them or flag error.
+                    // For reconciliation, usually unique ID per row.
+                    // If duplicate ID exists in same file, let's append suffix or sum?
+                    // Simple approach: Overwrite (last wins) or Log warning.
+                    // Let's assume unique for now.
+                    
+                    map.set(id, { date, desc, amount });
+                });
+
+                return map;
             }
-            if (amount === undefined || amount === null || isNaN(amount)) amount = 0;
-
-            let date = row[finalDate];
-            if (typeof date === 'number') {
-                    const dateObj = new Date(Math.round((date - 25569)*86400*1000));
-                    try { date = dateObj.toISOString().split('T')[0]; } catch(e) { date = 'Invalid Date'; }
-            } else {
-                date = String(date || '');
-            }
-
-            map.set(id, { date, desc: String(row[finalDesc] || ''), amount });
-        });
-
-        return map;
-    }
 `;
 
 function dashboard() {
