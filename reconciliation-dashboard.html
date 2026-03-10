@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Reconciliation Dashboard</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js for Interactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Icons (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- SheetJS for Excel Parsing -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        slate: {
+                            850: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbar for Dark Mode */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569; 
+        }
+        
+        .table-container {
+            height: calc(100vh - 220px); /* Adjust based on header height */
+        }
+        
+        /* High Density Tweaks */
+        td, th {
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-300 font-sans antialiased overflow-hidden" x-data="dashboard()">
+
+    <!-- Top Navigation / Header -->
+    <header class="h-14 border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm flex items-center justify-between px-4 sticky top-0 z-20">
+        <div class="flex items-center gap-3">
+            <div class="p-1.5 bg-blue-600/20 rounded-lg">
+                <i data-lucide="database" class="w-5 h-5 text-blue-400"></i>
+            </div>
+            <h1 class="font-semibold text-sm tracking-wide text-slate-100">DATA RECONCILIATION <span class="text-slate-500 font-normal">| Q3-2024</span></h1>
+        </div>
+        
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 text-xs text-slate-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Live
+                <span class="ml-2">Last Sync: 10:42 AM</span>
+            </div>
+            <button @click="data = []; files = {A: null, B: null};" class="p-2 hover:bg-slate-800 rounded-md transition-colors relative" title="New Reconciliation">
+                <i data-lucide="refresh-cw" class="w-4 h-4 text-slate-400"></i>
+            </button>
+            <button class="p-2 hover:bg-slate-800 rounded-md transition-colors relative">
+                <i data-lucide="bell" class="w-4 h-4 text-slate-400"></i>
+                <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-slate-900"></span>
+            </button>
+            <div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-medium text-slate-300">
+                DS
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="p-4 h-[calc(100vh-56px)] flex flex-col gap-4 relative">
+        
+        <!-- Upload Overlay / Initial State -->
+        <div x-show="data.length === 0" 
+             class="absolute inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-8 transition-opacity"
+             x-transition:leave="opacity-0 duration-300">
+            
+            <div class="max-w-4xl w-full flex flex-col gap-8">
+                <div class="text-center space-y-2">
+                    <h2 class="text-3xl font-semibold text-white">Upload Reconciliation Data</h2>
+                    <p class="text-slate-400">Upload both Excel files (.xlsx, .xls) to begin the reconciliation process.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Upload A -->
+                    <div class="bg-slate-900 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-blue-500/50 hover:bg-slate-800/50 transition-all group cursor-pointer relative">
+                        <input type="file" @change="handleFileUpload($event, 'A')" accept=".xlsx, .xls" class="absolute inset-0 opacity-0 cursor-pointer z-10">
+                        <div class="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                            <i data-lucide="file-spreadsheet" class="w-8 h-8 text-blue-400"></i>
+                        </div>
+                        <h3 class="text-lg font-medium text-slate-200">Workbook A (Source)</h3>
+                        <p class="text-sm text-slate-500 mt-2" x-text="files.A ? files.A.name : 'Drag & drop or click to upload'"></p>
+                        <p class="text-xs text-slate-600 mt-1" x-show="!files.A">Supported formats: .xlsx, .xls</p>
+                        <div x-show="files.A" class="mt-4 px-3 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full flex items-center gap-2">
+                            <i data-lucide="check" class="w-3 h-3"></i> Ready
+                        </div>
+                    </div>
+
+                    <!-- Upload B -->
+                    <div class="bg-slate-900 border-2 border-dashed border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:border-purple-500/50 hover:bg-slate-800/50 transition-all group cursor-pointer relative">
+                        <input type="file" @change="handleFileUpload($event, 'B')" accept=".xlsx, .xls" class="absolute inset-0 opacity-0 cursor-pointer z-10">
+                        <div class="w-16 h-16 bg-purple-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                            <i data-lucide="file-spreadsheet" class="w-8 h-8 text-purple-400"></i>
+                        </div>
+                        <h3 class="text-lg font-medium text-slate-200">Workbook B (Target)</h3>
+                        <p class="text-sm text-slate-500 mt-2" x-text="files.B ? files.B.name : 'Drag & drop or click to upload'"></p>
+                        <p class="text-xs text-slate-600 mt-1" x-show="!files.B">Supported formats: .xlsx, .xls</p>
+                        <div x-show="files.B" class="mt-4 px-3 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full flex items-center gap-2">
+                            <i data-lucide="check" class="w-3 h-3"></i> Ready
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Message -->
+                <div x-show="error" class="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg flex items-center gap-3" x-transition>
+                    <i data-lucide="alert-circle" class="w-5 h-5 shrink-0"></i>
+                    <span x-text="error"></span>
+                </div>
+
+                <div class="flex justify-center pt-4">
+                    <button @click="processFiles()" 
+                            :disabled="!files.A || !files.B || processing"
+                            class="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+                        <span x-show="!processing">Start Reconciliation</span>
+                        <span x-show="processing">Processing...</span>
+                        <i x-show="!processing" data-lucide="arrow-right" class="w-4 h-4"></i>
+                        <i x-show="processing" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                    </button>
+                </div>
+
+                <div class="text-center">
+                    <button @click="generateMockData()" class="text-xs text-slate-500 hover:text-slate-300 underline decoration-slate-700 hover:decoration-slate-500">
+                        Or use sample data for demo
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0" x-show="data.length > 0" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 transform scale-95">
+            <!-- Card A -->
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-1 shadow-sm">
+                <span class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Sum (Workbook A)</span>
+                <div class="flex items-baseline gap-2">
+                    <span class="text-xl font-mono font-semibold text-slate-100" x-text="formatCurrency(stats.totalA)"></span>
+                    <span class="text-[10px] text-slate-500 font-mono">IDR</span>
+                </div>
+            </div>
+
+            <!-- Card B -->
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-1 shadow-sm">
+                <span class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Sum (Workbook B)</span>
+                <div class="flex items-baseline gap-2">
+                    <span class="text-xl font-mono font-semibold text-slate-100" x-text="formatCurrency(stats.totalB)"></span>
+                    <span class="text-[10px] text-slate-500 font-mono">IDR</span>
+                </div>
+            </div>
+
+            <!-- Variance -->
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-1 shadow-sm relative overflow-hidden">
+                <div class="absolute right-0 top-0 p-3 opacity-10">
+                    <i data-lucide="activity" class="w-8 h-8 text-red-500"></i>
+                </div>
+                <span class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Variance</span>
+                <div class="flex items-baseline gap-2">
+                    <span class="text-xl font-mono font-semibold" 
+                          :class="stats.variance !== 0 ? 'text-red-400' : 'text-emerald-400'" 
+                          x-text="formatCurrency(stats.variance)"></span>
+                </div>
+            </div>
+
+            <!-- Mismatch Count -->
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-1 shadow-sm">
+                <span class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Discrepancies</span>
+                <div class="flex items-center gap-3 mt-1">
+                    <div class="flex flex-col">
+                        <span class="text-lg font-mono font-bold text-red-400" x-text="stats.mismatchCount"></span>
+                        <span class="text-[9px] text-slate-600">Mismatch</span>
+                    </div>
+                    <div class="w-px h-8 bg-slate-800"></div>
+                    <div class="flex flex-col">
+                        <span class="text-lg font-mono font-bold text-orange-400" x-text="stats.missingCount"></span>
+                        <span class="text-[9px] text-slate-600">Missing</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0 py-1">
+            <div class="relative w-full sm:w-96 group">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <i data-lucide="search" class="w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors"></i>
+                </div>
+                <input type="text" x-model="searchQuery" 
+                       class="block w-full pl-9 pr-3 py-1.5 border border-slate-700 rounded-md leading-5 bg-slate-900 text-slate-300 placeholder-slate-500 focus:outline-none focus:bg-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 sm:text-xs transition-all font-mono" 
+                       placeholder="Search by Unique ID, Description, or Amount...">
+                <div class="absolute inset-y-0 right-0 pr-2 flex items-center">
+                    <span class="text-[10px] text-slate-600 border border-slate-700 rounded px-1.5 py-0.5">⌘K</span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <!-- Filter Tabs -->
+                <div class="bg-slate-900 p-1 rounded-lg border border-slate-800 flex items-center">
+                    <template x-for="tab in ['all', 'mismatch', 'missing', 'match']">
+                        <button @click="activeFilter = tab" 
+                                class="px-3 py-1 text-[11px] font-medium rounded-md transition-all capitalize"
+                                :class="activeFilter === tab ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'">
+                            <span x-text="tab"></span>
+                            <span x-show="tab === 'mismatch' && stats.mismatchCount > 0" class="ml-1 text-[9px] bg-red-500/20 text-red-400 px-1 rounded-sm" x-text="stats.mismatchCount"></span>
+                        </button>
+                    </template>
+                </div>
+                
+                <button class="p-1.5 border border-slate-700 rounded-md bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors" title="Export Report">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="flex-1 bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col shadow-inner">
+            <div class="overflow-auto table-container relative custom-scrollbar">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-800/80 backdrop-blur sticky top-0 z-10 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-700">
+                        <tr>
+                            <th class="py-2 px-3 w-10 text-center border-r border-slate-700/50">#</th>
+                            <th class="py-2 px-4 w-48 border-r border-slate-700/50 cursor-pointer hover:text-slate-200" @click="sortBy('id')">
+                                <div class="flex items-center gap-1">Unique ID <i data-lucide="arrow-up-down" class="w-3 h-3"></i></div>
+                            </th>
+                            
+                            <!-- Workbook A Group -->
+                            <th colspan="3" class="py-1 px-2 text-center border-r border-slate-700/50 bg-blue-900/10 text-blue-400/80 border-b border-blue-900/20">Workbook A (Source)</th>
+                            
+                            <!-- Divider -->
+                            <th class="w-px bg-slate-700 p-0"></th>
+                            
+                            <!-- Workbook B Group -->
+                            <th colspan="3" class="py-1 px-2 text-center border-r border-slate-700/50 bg-purple-900/10 text-purple-400/80 border-b border-purple-900/20">Workbook B (Target)</th>
+                            
+                            <th class="py-2 px-4 w-32 text-right border-r border-slate-700/50">Diff</th>
+                            <th class="py-2 px-4 w-28 text-center">Status</th>
+                        </tr>
+                        <tr class="bg-slate-800/50">
+                            <!-- Sub-headers for clarity -->
+                            <th class="py-1 px-3 border-r border-slate-700/50"></th>
+                            <th class="py-1 px-4 border-r border-slate-700/50"></th>
+                            
+                            <!-- A Cols -->
+                            <th class="py-1 px-3 font-normal text-slate-500 border-r border-slate-700/50 w-24">Date</th>
+                            <th class="py-1 px-3 font-normal text-slate-500 border-r border-slate-700/50">Description</th>
+                            <th class="py-1 px-3 font-normal text-slate-500 border-r border-slate-700/50 text-right w-32">Amount</th>
+                            
+                            <th class="bg-slate-800 p-0"></th>
+
+                            <!-- B Cols -->
+                            <th class="py-1 px-3 font-normal text-slate-500 border-r border-slate-700/50 text-right w-32">Amount</th>
+                            <th class="py-1 px-3 font-normal text-slate-500 border-r border-slate-700/50">Description</th>
+                            <th class="py-1 px-3 font-normal text-slate-500 border-r border-slate-700/50 w-24">Date</th>
+                            
+                            <th class="py-1 px-4 border-r border-slate-700/50"></th>
+                            <th class="py-1 px-4"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/50 text-[11px] font-mono">
+                        <template x-for="(row, index) in filteredData" :key="row.id">
+                            <tr class="group hover:bg-slate-800/40 transition-colors duration-75">
+                                <td class="py-1.5 px-3 text-center text-slate-600 border-r border-slate-800" x-text="index + 1"></td>
+                                
+                                <!-- Unique ID -->
+                                <td class="py-1.5 px-4 font-medium text-slate-300 border-r border-slate-800 select-all" x-text="row.id"></td>
+                                
+                                <!-- Workbook A Data -->
+                                <td class="py-1.5 px-3 text-slate-500 border-r border-slate-800" x-text="row.a ? row.a.date : '-'"></td>
+                                <td class="py-1.5 px-3 text-slate-400 border-r border-slate-800 truncate max-w-[150px]" :title="row.a?.desc" x-text="row.a ? row.a.desc : '-'"></td>
+                                <td class="py-1.5 px-3 text-right font-medium border-r border-slate-800" 
+                                    :class="!row.a ? 'text-slate-700' : 'text-slate-300'">
+                                    <span x-text="row.a ? formatCurrency(row.a.amount) : 'Not Found'"></span>
+                                </td>
+
+                                <!-- Divider Visual -->
+                                <td class="w-px bg-slate-800 p-0"></td>
+
+                                <!-- Workbook B Data -->
+                                <td class="py-1.5 px-3 text-right font-medium border-r border-slate-800"
+                                    :class="getAmountClass(row)">
+                                    <span x-text="row.b ? formatCurrency(row.b.amount) : 'Not Found'"></span>
+                                </td>
+                                <td class="py-1.5 px-3 text-slate-400 border-r border-slate-800 truncate max-w-[150px]" :title="row.b?.desc" x-text="row.b ? row.b.desc : '-'"></td>
+                                <td class="py-1.5 px-3 text-slate-500 border-r border-slate-800" x-text="row.b ? row.b.date : '-'"></td>
+
+                                <!-- Variance -->
+                                <td class="py-1.5 px-4 text-right font-semibold border-r border-slate-800"
+                                    :class="getVarianceClass(row)">
+                                    <span x-text="formatVariance(getVariance(row))"></span>
+                                </td>
+
+                                <!-- Status Badge -->
+                                <td class="py-1.5 px-4 text-center">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border"
+                                          :class="getStatusBadgeClass(row)">
+                                        <span x-text="getStatusLabel(row)"></span>
+                                    </span>
+                                </td>
+                            </tr>
+                        </template>
+                        
+                        <!-- Empty State -->
+                        <tr x-show="filteredData.length === 0">
+                            <td colspan="11" class="py-12 text-center text-slate-500">
+                                <i data-lucide="search-x" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                                <p>No records found matching your criteria.</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination / Footer -->
+            <div class="bg-slate-900 border-t border-slate-800 p-2 flex justify-between items-center px-4 shrink-0 text-xs">
+                <span class="text-slate-500">Showing <span class="text-slate-300 font-mono" x-text="filteredData.length"></span> rows</span>
+                <div class="flex gap-2">
+                    <button class="px-3 py-1 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50" disabled>Previous</button>
+                    <button class="px-3 py-1 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800">Next</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        function dashboard() {
+            return {
+                searchQuery: '',
+                activeFilter: 'all',
+                sortKey: 'id',
+                sortAsc: true,
+                data: [],
+                files: { A: null, B: null },
+                processing: false,
+                error: null,
+                
+                init() {
+                    // Check if XLSX is loaded
+                    if (typeof XLSX === 'undefined') {
+                        this.error = "Library Excel parser failed to load. Please check your internet connection and refresh.";
+                    }
+                },
+
+                handleFileUpload(event, type) {
+                    this.error = null;
+                    const file = event.target.files[0];
+                    if (file) {
+                        this.files[type] = file;
+                    }
+                },
+
+                async processFiles() {
+                    if (!this.files.A || !this.files.B) return;
+                    
+                    this.processing = true;
+                    this.error = null;
+                    
+                    try {
+                        // Double check library
+                        if (typeof XLSX === 'undefined') {
+                            throw new Error("XLSX Library not loaded. Please refresh the page.");
+                        }
+
+                        const [dataA, dataB] = await Promise.all([
+                            this.readExcel(this.files.A),
+                            this.readExcel(this.files.B)
+                        ]);
+
+                        if (!dataA || dataA.length < 2) throw new Error("Workbook A is empty or invalid.");
+                        if (!dataB || dataB.length < 2) throw new Error("Workbook B is empty or invalid.");
+
+                        this.reconcileData(dataA, dataB);
+                    } catch (error) {
+                        console.error("Processing Error:", error);
+                        this.error = error.message || "An error occurred while processing files.";
+                    } finally {
+                        this.processing = false;
+                    }
+                },
+
+                readExcel(file) {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            try {
+                                const data = new Uint8Array(e.target.result);
+                                const workbook = XLSX.read(data, { type: 'array' });
+                                const firstSheetName = workbook.SheetNames[0];
+                                const worksheet = workbook.Sheets[firstSheetName];
+                                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Array of Arrays
+                                resolve(jsonData);
+                            } catch (err) {
+                                reject(err);
+                            }
+                        };
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                },
+
+                reconcileData(rawA, rawB) {
+                    // Check headers
+                    if (!rawA[0] || !Array.isArray(rawA[0])) throw new Error("Workbook A has no valid header row.");
+                    if (!rawB[0] || !Array.isArray(rawB[0])) throw new Error("Workbook B has no valid header row.");
+
+                    // normalize headers
+                    const headersA = rawA[0].map(h => String(h || '').toLowerCase());
+                    const headersB = rawB[0].map(h => String(h || '').toLowerCase());
+                    
+                    const rowsA = rawA.slice(1);
+                    const rowsB = rawB.slice(1);
+
+                    const mapA = this.mapRows(rowsA, headersA, 'A');
+                    const mapB = this.mapRows(rowsB, headersB, 'B');
+
+                    if (mapA.size === 0) throw new Error("Could not find any valid data rows in Workbook A. Please check column names (ID, Date, Desc, Amount).");
+                    if (mapB.size === 0) throw new Error("Could not find any valid data rows in Workbook B. Please check column names (ID, Date, Desc, Amount).");
+
+                    // Merge Logic
+                    const allIds = new Set([...mapA.keys(), ...mapB.keys()]);
+                    const mergedData = [];
+
+                    allIds.forEach(id => {
+                        if(!id) return; // skip empty ids
+                        mergedData.push({
+                            id: id,
+                            a: mapA.get(id) || null,
+                            b: mapB.get(id) || null
+                        });
+                    });
+
+                    this.data = mergedData;
+                },
+
+                mapRows(rows, headers, sourceName) {
+                    const map = new Map();
+                    
+                    // Auto-detect columns indices
+                    // Expanded keywords for better matching
+                    const idxId = headers.findIndex(h => h.includes('id') || h.includes('ref') || h.includes('trx') || h.includes('code') || h.includes('nomor') || h.includes('unique'));
+                    const idxDate = headers.findIndex(h => h.includes('date') || h.includes('tanggal') || h.includes('waktu') || h.includes('time'));
+                    const idxDesc = headers.findIndex(h => h.includes('desc') || h.includes('ket') || h.includes('uraian') || h.includes('detail') || h.includes('name') || h.includes('nama'));
+                    const idxAmount = headers.findIndex(h => h.includes('amount') || h.includes('nominal') || h.includes('nilai') || h.includes('total') || h.includes('jumlah') || h.includes('harga') || h.includes('bayar'));
+
+                    // Fallback if detection fails
+                    // If we can't find columns, maybe try first 4 columns
+                    let finalId = idxId;
+                    let finalDate = idxDate;
+                    let finalDesc = idxDesc;
+                    let finalAmount = idxAmount;
+
+                    // If critical columns are missing, try default positions
+                    if (finalId === -1) finalId = 0;
+                    if (finalAmount === -1) {
+                         // Try to find a number column if amount keyword not found
+                         // This is hard without data, so just fallback to column 3 or last column
+                         finalAmount = headers.length > 3 ? 3 : headers.length - 1;
+                    }
+
+                    console.log(`Mapping ${sourceName}: ID=${finalId}, Date=${finalDate}, Desc=${finalDesc}, Amount=${finalAmount}`);
+
+                    rows.forEach((row, index) => {
+                        if (!row || row.length === 0) return;
+                        
+                        // ID is critical
+                        const id = String(row[finalId] || '').trim();
+                        if (!id || id.toLowerCase() === 'total' || id.toLowerCase() === 'grand total') return; // Skip total rows
+
+                        // Clean Amount
+                        let amount = row[finalAmount];
+                        // Handle accounting format (e.g. "(1,000)") or currency symbols
+                        if (typeof amount === 'string') {
+                            let cleanStr = amount.replace(/[^0-9.,-]/g, ""); // Keep only numbers, dots, commas, minus
+                            // Detect if comma is decimal or thousand separator
+                            // Simple assumption: if it has both . and ,, last one is decimal
+                            // Indonesian locale: 1.000,00 -> 1000.00
+                            // US locale: 1,000.00 -> 1000.00
+                            
+                            // Remove thousand separators if present
+                            // This is tricky. Let's try a simple approach: remove all non-numeric except . and -
+                            // Better approach: use a library or simple heuristic
+                            
+                            // Fallback: simple parse
+                            amount = parseFloat(amount.replace(/[^0-9.-]+/g,""));
+                        }
+                        
+                        if (amount === undefined || amount === null || isNaN(amount)) amount = 0;
+
+                        // Format Date
+                        let date = row[finalDate];
+                        if (typeof date === 'number') {
+                             // Excel date to JS date
+                             const dateObj = new Date(Math.round((date - 25569)*86400*1000));
+                             try {
+                                date = dateObj.toISOString().split('T')[0];
+                             } catch(e) {
+                                date = 'Invalid Date';
+                             }
+                        } else {
+                            date = String(date || '');
+                        }
+
+                        map.set(id, {
+                            date: date,
+                            desc: String(row[finalDesc] || ''),
+                            amount: amount
+                        });
+                    });
+
+                    return map;
+                },
+
+                generateMockData() {
+                    const baseData = [
+                        { id: 'TRX_22378848_001', a: { date: '2024-03-01', desc: 'Payment Gateway Settlement', amount: 1500000 }, b: { date: '2024-03-01', desc: 'Settlement #001', amount: 1500000 } }, // Match
+                        { id: 'TRX_22378848_002', a: { date: '2024-03-01', desc: 'Vendor Payment #A2', amount: 250000 }, b: { date: '2024-03-02', desc: 'Vendor Pay #A2', amount: 250000 } }, // Match (Diff Date ignored for logic, strict amount match)
+                        { id: 'TRX_22378848_003', a: { date: '2024-03-02', desc: 'Service Fee Q1', amount: 15000 }, b: { date: '2024-03-02', desc: 'Service Fee', amount: 10000 } }, // Mismatch
+                        { id: 'TRX_22378848_004', a: { date: '2024-03-02', desc: 'Refund Request #99', amount: -50000 }, b: null }, // Missing in B
+                        { id: 'TRX_22378848_005', a: null, b: { date: '2024-03-03', desc: 'Late Charge Adjustment', amount: 5000 } }, // Missing in A
+                        { id: 'TRX_22378848_006', a: { date: '2024-03-03', desc: 'Subscription Renewal', amount: 750000 }, b: { date: '2024-03-03', desc: 'Sub Renewal', amount: 750000 } },
+                        { id: 'TRX_22378848_007', a: { date: '2024-03-04', desc: 'Bulk Transfer Batch 1', amount: 5000000 }, b: { date: '2024-03-04', desc: 'Bulk Trf B1', amount: 4999500 } }, // Mismatch (small)
+                        { id: 'TRX_22378848_008', a: { date: '2024-03-04', desc: 'Tax Deduction', amount: 12500 }, b: { date: '2024-03-04', desc: 'Tax', amount: 12500 } },
+                    ];
+
+                    // Multiply data for density feel
+                    let extendedData = [...baseData];
+                    for(let i=0; i<3; i++) {
+                         baseData.forEach((item, idx) => {
+                             if(idx > 1) { // Skip some to keep unique IDs logic somewhat sane for mock
+                                 const newItem = JSON.parse(JSON.stringify(item));
+                                 newItem.id = newItem.id.replace(`_${idx+1}`, `_${idx+1}_C${i}`);
+                                 extendedData.push(newItem);
+                             }
+                         });
+                    }
+                    this.data = extendedData;
+                },
+
+                get filteredData() {
+                    return this.data.filter(row => {
+                        // Search Logic
+                        const searchLower = this.searchQuery.toLowerCase();
+                        const matchesSearch = row.id.toLowerCase().includes(searchLower) || 
+                                              (row.a && row.a.desc.toLowerCase().includes(searchLower)) || 
+                                              (row.b && row.b.desc.toLowerCase().includes(searchLower)) ||
+                                              (row.a && row.a.amount.toString().includes(searchLower));
+
+                        if (!matchesSearch) return false;
+
+                        // Tab Filter Logic
+                        const status = this.getStatus(row); // match, mismatch, missing_a, missing_b
+                        if (this.activeFilter === 'all') return true;
+                        if (this.activeFilter === 'match') return status === 'match';
+                        if (this.activeFilter === 'mismatch') return status === 'mismatch';
+                        if (this.activeFilter === 'missing') return status === 'missing_a' || status === 'missing_b';
+                        
+                        return true;
+                    }).sort((a, b) => {
+                        // Simple sort by ID
+                        return this.sortAsc ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
+                    });
+                },
+
+                get stats() {
+                    let totalA = 0;
+                    let totalB = 0;
+                    let mismatchCount = 0;
+                    let missingCount = 0;
+
+                    this.data.forEach(row => {
+                        const valA = row.a ? row.a.amount : 0;
+                        const valB = row.b ? row.b.amount : 0;
+                        
+                        totalA += valA;
+                        totalB += valB;
+
+                        const status = this.getStatus(row);
+                        if (status === 'mismatch') mismatchCount++;
+                        if (status === 'missing_a' || status === 'missing_b') missingCount++;
+                    });
+
+                    return {
+                        totalA,
+                        totalB,
+                        variance: totalA - totalB,
+                        mismatchCount,
+                        missingCount
+                    };
+                },
+
+                // --- Helpers ---
+
+                getVariance(row) {
+                    const valA = row.a ? row.a.amount : 0;
+                    const valB = row.b ? row.b.amount : 0;
+                    return valA - valB;
+                },
+
+                getStatus(row) {
+                    if (!row.a && row.b) return 'missing_a';
+                    if (row.a && !row.b) return 'missing_b';
+                    if (row.a.amount !== row.b.amount) return 'mismatch';
+                    return 'match';
+                },
+
+                // --- Styling Helpers ---
+
+                getAmountClass(row) {
+                    if (!row.b) return 'text-slate-700 italic';
+                    if (!row.a) return 'text-orange-400 font-bold'; // Highlight if extra in B
+                    if (row.a.amount !== row.b.amount) return 'text-red-400 font-bold bg-red-500/10 rounded px-1';
+                    return 'text-emerald-400';
+                },
+
+                getVarianceClass(row) {
+                    const v = this.getVariance(row);
+                    if (v === 0) return 'text-slate-600 opacity-50';
+                    return 'text-red-400';
+                },
+
+                getStatusBadgeClass(row) {
+                    const s = this.getStatus(row);
+                    if (s === 'match') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                    if (s === 'mismatch') return 'bg-red-500/10 text-red-400 border-red-500/20';
+                    return 'bg-orange-500/10 text-orange-400 border-orange-500/20';
+                },
+
+                getStatusLabel(row) {
+                    const s = this.getStatus(row);
+                    if (s === 'match') return 'MATCHED';
+                    if (s === 'mismatch') return 'MISMATCH';
+                    if (s === 'missing_b') return 'NOT IN B';
+                    if (s === 'missing_a') return 'NOT IN A';
+                    return 'UNKNOWN';
+                },
+
+                sortBy(key) {
+                    if (this.sortKey === key) {
+                        this.sortAsc = !this.sortAsc;
+                    } else {
+                        this.sortKey = key;
+                        this.sortAsc = true;
+                    }
+                },
+
+                formatCurrency(value) {
+                    return new Intl.NumberFormat('id-ID').format(value);
+                },
+
+                formatVariance(value) {
+                    if (value === 0) return '-';
+                    const sign = value > 0 ? '+' : '';
+                    return sign + this.formatCurrency(value);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
