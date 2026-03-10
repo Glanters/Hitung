@@ -9,56 +9,93 @@ const workerScript = `
         const { type, payload } = e.data;
         
         if (type === 'PROCESS') {
-            try {
-                const { bufferA, bufferB } = payload;
-                
-                self.postMessage({ type: 'PROGRESS', payload: { percent: 10, text: 'Reading Workbook A...' } });
-                const rawA = readExcel(bufferA);
-                
-                self.postMessage({ type: 'PROGRESS', payload: { percent: 40, text: 'Reading Workbook B...' } });
-                const rawB = readExcel(bufferB);
-                
-                self.postMessage({ type: 'PROGRESS', payload: { percent: 70, text: 'Reconciling Data...' } });
-                const result = reconcileData(rawA, rawB);
-                
-                self.postMessage({ type: 'DONE', payload: result });
-            } catch (error) {
-                self.postMessage({ type: 'ERROR', payload: error.message });
+                    try {
+                        const { bufferA, bufferB } = payload;
+                        
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 10, text: 'Reading Workbook A...' } });
+                        const rawA = readExcel(bufferA);
+                        
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 30, text: 'Reading Workbook B...' } });
+                        const rawB = readExcel(bufferB);
+                        
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 50, text: 'Mapping Data Structure...' } });
+                        const headersA = rawA[0].map(h => String(h || '').toLowerCase());
+                        const headersB = rawB[0].map(h => String(h || '').toLowerCase());
+                        
+                        const mapA = mapRows(rawA.slice(1), headersA, 'A');
+                        
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 70, text: 'Processing 400k Rows...' } });
+                        const mapB = mapRows(rawB.slice(1), headersB, 'B');
+                        
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 90, text: 'Finalizing Reconciliation...' } });
+                        const result = reconcileDataMap(mapA, mapB);
+                        
+                        self.postMessage({ type: 'PROGRESS', payload: { percent: 90, text: 'Calculating Statistics...' } });
+                        const stats = calculateStats(result);
+                        
+                        self.postMessage({ type: 'DONE', payload: { data: result, stats: stats } });
+                    } catch (error) {
+                        self.postMessage({ type: 'ERROR', payload: error.message });
+                    }
+                }
+            };
+
+            function calculateStats(data) {
+                let totalA = 0;
+                let totalB = 0;
+                let mismatchCount = 0;
+                let missingACount = 0;
+                let missingBCount = 0;
+
+                for (let i = 0; i < data.length; i++) {
+                    const row = data[i];
+                    if (row.a) totalA += row.a.amount;
+                    if (row.b) totalB += row.b.amount;
+                    
+                    if (!row.a && row.b) missingACount++;
+                    else if (row.a && !row.b) missingBCount++;
+                    else if (row.a.amount !== row.b.amount) mismatchCount++;
+                }
+
+                return {
+                    totalA,
+                    totalB,
+                    variance: totalA - totalB,
+                    mismatchCount,
+                    missingACount,
+                    missingBCount,
+                    missingCount: missingACount + missingBCount
+                };
             }
-        }
-    };
 
-    function readExcel(buffer) {
-        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        return XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    }
+            function readExcel(buffer) {
+                const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                return XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            }
 
-    function reconcileData(rawA, rawB) {
-        if (!rawA[0] || !Array.isArray(rawA[0])) throw new Error("Workbook A has no valid header row.");
-        if (!rawB[0] || !Array.isArray(rawB[0])) throw new Error("Workbook B has no valid header row.");
+            function reconcileDataMap(mapA, mapB) {
+                const allIds = new Set([...mapA.keys(), ...mapB.keys()]);
+                const mergedData = [];
+                
+                // Convert Set to Array for chunk processing if needed, but for now direct loop
+                // Optimization: Pre-allocate array size? No, JS arrays are dynamic.
+                
+                let count = 0;
+                const total = allIds.size;
+                
+                allIds.forEach(id => {
+                    if(!id) return;
+                    mergedData.push({
+                        id: id,
+                        a: mapA.get(id) || null,
+                        b: mapB.get(id) || null
+                    });
+                });
 
-        const headersA = rawA[0].map(h => String(h || '').toLowerCase());
-        const headersB = rawB[0].map(h => String(h || '').toLowerCase());
-        
-        const mapA = mapRows(rawA.slice(1), headersA, 'A');
-        const mapB = mapRows(rawB.slice(1), headersB, 'B');
-
-        const allIds = new Set([...mapA.keys(), ...mapB.keys()]);
-        const mergedData = [];
-
-        allIds.forEach(id => {
-            if(!id) return;
-            mergedData.push({
-                id: id,
-                a: mapA.get(id) || null,
-                b: mapB.get(id) || null
-            });
-        });
-
-        return mergedData;
-    }
+                return mergedData;
+            }
 
     function mapRows(rows, headers, sourceName) {
         const map = new Map();
@@ -107,7 +144,8 @@ function dashboard() {
         sortKey: 'id',
         sortAsc: true,
         data: [],
-        files: { A: null, B: null },
+                statsData: null, // Cache for stats
+                files: { A: null, B: null },
         processing: false,
         progress: 0,
         progressText: '',
@@ -129,9 +167,12 @@ function dashboard() {
                     this.progress = payload.percent;
                     this.progressText = payload.text;
                 } else if (type === 'DONE') {
-                    this.data = payload;
+                    // Receive separate payload for data and stats
+                    this.data = payload.data;
+                    this.statsData = payload.stats;
                     this.processing = false;
                     this.progress = 100;
+                    this.activeFilter = 'all'; 
                 } else if (type === 'ERROR') {
                     this.error = payload;
                     this.processing = false;
@@ -191,7 +232,8 @@ function dashboard() {
                     const s = this.getStatus(row);
                     if (this.activeFilter === 'match') return s === 'match';
                     if (this.activeFilter === 'mismatch') return s === 'mismatch';
-                    if (this.activeFilter === 'missing') return s === 'missing_a' || s === 'missing_b';
+                    if (this.activeFilter === 'missing_a') return s === 'missing_a';
+                    if (this.activeFilter === 'missing_b') return s === 'missing_b';
                     return true;
                 });
             }
@@ -223,44 +265,18 @@ function dashboard() {
         },
 
         get stats() {
-            // Recalculating stats on 400k rows might be heavy on every render.
-            // Ideally this should be cached or calculated in worker.
-            // For now, let's try calculating it only when data changes or simplified.
-            // But Alpine computed properties are reactive.
-            // Optimization: Use a separate "meta" object updated only when data/filter changes?
-            // Let's keep it simple first. If slow, we optimize.
+            // Optimization: Do NOT recalculate on every render if data hasn't changed.
+            // But Alpine.js computed properties are already memoized until dependencies change.
+            // The dependency here is `this.data` which is HUGE (400k rows).
+            // Accessing `this.data` triggers the proxy trap for the whole array.
             
-            let totalA = 0;
-            let totalB = 0;
-            let mismatchCount = 0;
-            let missingCount = 0;
-
-            // We calculate stats based on FULL data (or filtered data? Usually dashboard stats show full context or filtered context)
-            // Let's match current view (filtered)
-            const source = this.filteredList; 
-
-            // Optimization: simple for loop is faster than reduce/forEach
-            for (let i = 0; i < source.length; i++) {
-                const row = source[i];
-                if (row.a) totalA += row.a.amount;
-                if (row.b) totalB += row.b.amount;
-                
-                // Status check inline for speed
-                let status = 'match';
-                if (!row.a && row.b) status = 'missing_a';
-                else if (row.a && !row.b) status = 'missing_b';
-                else if (row.a.amount !== row.b.amount) status = 'mismatch';
-
-                if (status === 'mismatch') mismatchCount++;
-                if (status === 'missing_a' || status === 'missing_b') missingCount++;
-            }
-
-            return {
-                totalA,
-                totalB,
-                variance: totalA - totalB,
-                mismatchCount,
-                missingCount
+            // CRITICAL FIX: Return cached stats if available and data length hasn't changed significantly?
+            // Better: Calculate stats ONCE inside the worker and pass it back.
+            // For now, let's use a simplified approximation or calculate only when explicitly asked?
+            // Or: Use a separate `statsData` property that we update manually when data changes.
+            
+            return this.statsData || {
+                totalA: 0, totalB: 0, variance: 0, mismatchCount: 0, missingACount: 0, missingBCount: 0, missingCount: 0
             };
         },
 
