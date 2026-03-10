@@ -46,15 +46,29 @@ const workerScript = `
                 let mismatchCount = 0;
                 let missingACount = 0;
                 let missingBCount = 0;
+                
+                // Detailed breakdown totals
+                let totalMismatchDiff = 0;
+                let totalMissingA = 0;
+                let totalMissingB = 0;
 
                 for (let i = 0; i < data.length; i++) {
                     const row = data[i];
                     if (row.a) totalA += row.a.amount;
                     if (row.b) totalB += row.b.amount;
                     
-                    if (!row.a && row.b) missingACount++;
-                    else if (row.a && !row.b) missingBCount++;
-                    else if (row.a.amount !== row.b.amount) mismatchCount++;
+                    if (!row.a && row.b) {
+                        missingACount++;
+                        totalMissingA += row.b.amount;
+                    }
+                    else if (row.a && !row.b) {
+                        missingBCount++;
+                        totalMissingB += row.a.amount;
+                    }
+                    else if (row.a.amount !== row.b.amount) {
+                        mismatchCount++;
+                        totalMismatchDiff += Math.abs(row.a.amount - row.b.amount);
+                    }
                 }
 
                 return {
@@ -64,7 +78,10 @@ const workerScript = `
                     mismatchCount,
                     missingACount,
                     missingBCount,
-                    missingCount: missingACount + missingBCount
+                    missingCount: missingACount + missingBCount,
+                    totalMismatchDiff,
+                    totalMissingA,
+                    totalMissingB
                 };
             }
 
@@ -129,12 +146,13 @@ const workerScript = `
 
                 // Amount Column (Nominal)
                 // A: amount / total ? (User data shows amount 150,000 and total 148,350 (net)). 
-                // Usually reconciliation is on GROSS amount before fee, or NET?
-                // Let's look for 'amount' first, then 'total' if amount not found.
-                // User input: "amount 150,000.00"
+                // B: "Jumlah Operator" (User Instruction)
                 const idxAmount = headers.findIndex(h => {
                     const val = h.toLowerCase().trim();
-                    return val === 'amount' || val === 'nominal' || val === 'jumlah';
+                    if (sourceName === 'B') {
+                        return val === 'jumlah operator' || val.includes('jumlah operator') || val === 'amount' || val === 'nominal' || val === 'jumlah';
+                    }
+                    return val === 'amount' || val === 'nominal' || val === 'jumlah' || val === 'total';
                 });
 
                 // Fallbacks
@@ -358,7 +376,8 @@ function dashboard() {
             // Or: Use a separate `statsData` property that we update manually when data changes.
             
             return this.statsData || {
-                totalA: 0, totalB: 0, variance: 0, mismatchCount: 0, missingACount: 0, missingBCount: 0, missingCount: 0
+                totalA: 0, totalB: 0, variance: 0, mismatchCount: 0, missingACount: 0, missingBCount: 0, missingCount: 0,
+                totalMismatchDiff: 0, totalMissingA: 0, totalMissingB: 0
             };
         },
 

@@ -120,7 +120,7 @@
                         <div class="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                             <i data-lucide="file-spreadsheet" class="w-8 h-8 text-blue-400"></i>
                         </div>
-                        <h3 class="text-lg font-medium text-slate-200">Workbook A (Source)</h3>
+                        <h3 class="text-lg font-medium text-slate-200">Workbook A (QRIS)</h3>
                         <p class="text-sm text-slate-500 mt-2" x-text="files.A ? files.A.name : 'Drag & drop or click to upload'"></p>
                         <p class="text-xs text-slate-600 mt-1" x-show="!files.A">Supported formats: .xlsx, .xls</p>
                         <div x-show="files.A" class="mt-4 px-3 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full flex items-center gap-2">
@@ -134,7 +134,7 @@
                         <div class="w-16 h-16 bg-purple-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                             <i data-lucide="file-spreadsheet" class="w-8 h-8 text-purple-400"></i>
                         </div>
-                        <h3 class="text-lg font-medium text-slate-200">Workbook B (Target)</h3>
+                        <h3 class="text-lg font-medium text-slate-200">Workbook B (ADMIN)</h3>
                         <p class="text-sm text-slate-500 mt-2" x-text="files.B ? files.B.name : 'Drag & drop or click to upload'"></p>
                         <p class="text-xs text-slate-600 mt-1" x-show="!files.B">Supported formats: .xlsx, .xls</p>
                         <div x-show="files.B" class="mt-4 px-3 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full flex items-center gap-2">
@@ -211,22 +211,43 @@
             </div>
 
             <!-- Mismatch Count -->
-            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-1 shadow-sm">
-                <span class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Discrepancies</span>
-                <div class="flex items-center gap-3 mt-1">
-                    <div class="flex flex-col">
-                        <span class="text-lg font-mono font-bold text-red-400" x-text="stats.mismatchCount"></span>
-                        <span class="text-[9px] text-slate-600">Mismatch</span>
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col gap-1 shadow-sm col-span-1 md:col-span-4">
+                <span class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Discrepancy Details</span>
+                <div class="grid grid-cols-3 gap-4 mt-1">
+                    <!-- Mismatch -->
+                    <div class="flex flex-col border-r border-slate-800 pr-4">
+                        <div class="flex justify-between items-baseline">
+                            <span class="text-[10px] text-slate-500 uppercase">Mismatch Count</span>
+                            <span class="text-sm font-mono font-bold text-red-400" x-text="stats.mismatchCount"></span>
+                        </div>
+                        <div class="flex justify-between items-baseline mt-1">
+                            <span class="text-[10px] text-slate-500">Total Diff</span>
+                            <span class="text-xs font-mono font-medium text-red-300" x-text="formatCurrency(stats.totalMismatchDiff)"></span>
+                        </div>
                     </div>
-                    <div class="w-px h-8 bg-slate-800"></div>
-                    <div class="flex flex-col">
-                        <span class="text-lg font-mono font-bold text-orange-400" x-text="stats.missingACount"></span>
-                        <span class="text-[9px] text-slate-600">Not in A</span>
+
+                    <!-- Not in A -->
+                    <div class="flex flex-col border-r border-slate-800 pr-4 pl-4">
+                        <div class="flex justify-between items-baseline">
+                            <span class="text-[10px] text-slate-500 uppercase">Not in A</span>
+                            <span class="text-sm font-mono font-bold text-orange-400" x-text="stats.missingACount"></span>
+                        </div>
+                        <div class="flex justify-between items-baseline mt-1">
+                            <span class="text-[10px] text-slate-500">Total Amount</span>
+                            <span class="text-xs font-mono font-medium text-orange-300" x-text="formatCurrency(stats.totalMissingA)"></span>
+                        </div>
                     </div>
-                    <div class="w-px h-8 bg-slate-800"></div>
-                    <div class="flex flex-col">
-                        <span class="text-lg font-mono font-bold text-yellow-400" x-text="stats.missingBCount"></span>
-                        <span class="text-[9px] text-slate-600">Not in B</span>
+
+                    <!-- Not in B -->
+                    <div class="flex flex-col pl-4">
+                        <div class="flex justify-between items-baseline">
+                            <span class="text-[10px] text-slate-500 uppercase">Not in B</span>
+                            <span class="text-sm font-mono font-bold text-yellow-400" x-text="stats.missingBCount"></span>
+                        </div>
+                        <div class="flex justify-between items-baseline mt-1">
+                            <span class="text-[10px] text-slate-500">Total Amount</span>
+                            <span class="text-xs font-mono font-medium text-yellow-300" x-text="formatCurrency(stats.totalMissingB)"></span>
+                        </div>
                     </div>
                 </div>
             </div>
