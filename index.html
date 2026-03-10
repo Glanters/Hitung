@@ -86,7 +86,7 @@
                 <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Live
                 <span class="ml-2">Last Sync: 10:42 AM</span>
             </div>
-            <button @click="data = []; files = {A: null, B: null};" class="p-2 hover:bg-slate-800 rounded-md transition-colors relative" title="New Reconciliation">
+            <button @click="if(confirm('Are you sure you want to start a new reconciliation? This will clear current data.')) { data = []; statsData = null; files = {A: [], B: []}; localStorage.removeItem('reconciliation_data'); localStorage.removeItem('reconciliation_stats'); }" class="p-2 hover:bg-slate-800 rounded-md transition-colors relative" title="New Reconciliation">
                 <i data-lucide="refresh-cw" class="w-4 h-4 text-slate-400"></i>
             </button>
             <button class="p-2 hover:bg-slate-800 rounded-md transition-colors relative">

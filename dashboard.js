@@ -277,29 +277,64 @@ function dashboard() {
         page: 1,
         limit: 50,
         
+        // Cache for filtered lists
+        _cache: {
+           all: null,
+           mismatch: null,
+           missing_a: null,
+           missing_b: null
+        },
+
         init() {
-            // Create Web Worker
-            const blob = new Blob([workerScript], { type: 'application/javascript' });
-            this.worker = new Worker(URL.createObjectURL(blob));
-            
-            this.worker.onmessage = (e) => {
-                const { type, payload } = e.data;
-                if (type === 'PROGRESS') {
-                    this.progress = payload.percent;
-                    this.progressText = payload.text;
-                } else if (type === 'DONE') {
+                    // Load data from LocalStorage if available
+                    const savedData = localStorage.getItem('reconciliation_data');
+                    const savedStats = localStorage.getItem('reconciliation_stats');
+                    
+                    if (savedData && savedStats) {
+                        try {
+                            this.data = JSON.parse(savedData);
+                            this.statsData = JSON.parse(savedStats);
+                        } catch (e) {
+                            console.error("Failed to load saved data", e);
+                            localStorage.removeItem('reconciliation_data');
+                            localStorage.removeItem('reconciliation_stats');
+                        }
+                    }
+
+                    // Create Web Worker
+                    const blob = new Blob([workerScript], { type: 'application/javascript' });
+                    this.worker = new Worker(URL.createObjectURL(blob));
+                    
+                    this.worker.onmessage = (e) => {
+                        const { type, payload } = e.data;
+                        if (type === 'PROGRESS') {
+                            this.progress = payload.percent;
+                            this.progressText = payload.text;
+                        } else if (type === 'DONE') {
                     // Receive separate payload for data and stats
                     this.data = payload.data;
                     this.statsData = payload.stats;
-                    this.processing = false;
-                    this.progress = 100;
-                    this.activeFilter = 'all'; 
-                } else if (type === 'ERROR') {
-                    this.error = payload;
-                    this.processing = false;
-                }
-            };
-        },
+                    
+                    // Reset cache when new data arrives
+                    this._cache = { all: null, mismatch: null, missing_a: null, missing_b: null };
+
+                    // Save to LocalStorage
+                    try {
+                                localStorage.setItem('reconciliation_data', JSON.stringify(this.data));
+                                localStorage.setItem('reconciliation_stats', JSON.stringify(this.statsData));
+                            } catch (e) {
+                                console.warn("Storage quota exceeded, cannot save data for persistence.", e);
+                            }
+
+                            this.processing = false;
+                            this.progress = 100;
+                            this.activeFilter = 'all'; 
+                        } else if (type === 'ERROR') {
+                            this.error = payload;
+                            this.processing = false;
+                        }
+                    };
+                },
 
         handleFileUpload(event, type) {
             this.error = null;
@@ -360,34 +395,48 @@ function dashboard() {
         },
 
         get filteredList() {
-            // This is the heavy filtering logic, but it's only 1-time per search input
-            let result = this.data;
+                    // Cache Strategy
+                    if (this.searchQuery) {
+                        // If searching, bypass cache or use a separate search cache
+                        // Searching 400k rows is always expensive.
+                        const q = this.searchQuery.toLowerCase();
+                        return this.data.filter(row => 
+                            row.id.toLowerCase().includes(q) || 
+                            (row.a && row.a.desc.toLowerCase().includes(q)) || 
+                            (row.b && row.b.desc.toLowerCase().includes(q)) ||
+                            (row.a && row.a.amount.toString().includes(q))
+                        );
+                    }
 
-            if (this.searchQuery) {
-                const q = this.searchQuery.toLowerCase();
-                result = result.filter(row => 
-                    row.id.toLowerCase().includes(q) || 
-                    (row.a && row.a.desc.toLowerCase().includes(q)) || 
-                    (row.b && row.b.desc.toLowerCase().includes(q)) ||
-                    (row.a && row.a.amount.toString().includes(q))
-                );
-            }
+                    // If no search, use cache based on active filter
+                    if (this._cache[this.activeFilter]) {
+                        return this._cache[this.activeFilter];
+                    }
 
-            if (this.activeFilter !== 'all') {
-                result = result.filter(row => {
-                    const s = this.getStatus(row);
-                    if (this.activeFilter === 'match') return s === 'match';
-                    if (this.activeFilter === 'mismatch') return s === 'mismatch';
-                    if (this.activeFilter === 'missing_a') return s === 'missing_a';
-                    if (this.activeFilter === 'missing_b') return s === 'missing_b';
-                    return true;
-                });
-            }
+                    let result = this.data;
 
-            return result.sort((a, b) => {
-                    return this.sortAsc ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
-            });
-        },
+                    if (this.activeFilter !== 'all') {
+                        result = result.filter(row => {
+                            const s = this.getStatus(row);
+                            if (this.activeFilter === 'match') return s === 'match';
+                            if (this.activeFilter === 'mismatch') return s === 'mismatch';
+                            if (this.activeFilter === 'missing_a') return s === 'missing_a';
+                            if (this.activeFilter === 'missing_b') return s === 'missing_b';
+                            return true;
+                        });
+                    }
+                    
+                    // Sort (usually expensive too)
+                    // Optimization: Pre-sort or sort only when needed.
+                    // For now, let's cache the sorted result.
+                    result = result.sort((a, b) => {
+                         return this.sortAsc ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
+                    });
+
+                    // Save to cache
+                    this._cache[this.activeFilter] = result;
+                    return result;
+                },
 
         // Proxy to filteredList to keep compatibility if needed, but we use pagination now
         get filteredData() {
