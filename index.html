@@ -143,6 +143,12 @@
                     </div>
                 </div>
 
+                <!-- Progress Bar -->
+                <div x-show="processing" class="w-full bg-slate-800 rounded-full h-2.5 mb-1 relative overflow-hidden">
+                    <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="`width: ${progress}%`"></div>
+                </div>
+                <p x-show="processing" class="text-center text-xs text-slate-400" x-text="progressText"></p>
+
                 <!-- Error Message -->
                 <div x-show="error" class="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg flex items-center gap-3" x-transition>
                     <i data-lucide="alert-circle" class="w-5 h-5 shrink-0"></i>
@@ -154,7 +160,7 @@
                             :disabled="!files.A || !files.B || processing"
                             class="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
                         <span x-show="!processing">Start Reconciliation</span>
-                        <span x-show="processing">Processing...</span>
+                        <span x-show="processing">Processing Large Data...</span>
                         <i x-show="!processing" data-lucide="arrow-right" class="w-4 h-4"></i>
                         <i x-show="processing" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
                     </button>
@@ -296,9 +302,9 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-800/50 text-[11px] font-mono">
-                        <template x-for="(row, index) in filteredData" :key="row.id">
+                        <template x-for="(row, index) in visibleData" :key="row.id">
                             <tr class="group hover:bg-slate-800/40 transition-colors duration-75">
-                                <td class="py-1.5 px-3 text-center text-slate-600 border-r border-slate-800" x-text="index + 1"></td>
+                                <td class="py-1.5 px-3 text-center text-slate-600 border-r border-slate-800" x-text="(page - 1) * limit + index + 1"></td>
                                 
                                 <!-- Unique ID -->
                                 <td class="py-1.5 px-4 font-medium text-slate-300 border-r border-slate-800 select-all" x-text="row.id"></td>
@@ -351,350 +357,17 @@
             
             <!-- Pagination / Footer -->
             <div class="bg-slate-900 border-t border-slate-800 p-2 flex justify-between items-center px-4 shrink-0 text-xs">
-                <span class="text-slate-500">Showing <span class="text-slate-300 font-mono" x-text="filteredData.length"></span> rows</span>
+                <span class="text-slate-500">Showing <span class="text-slate-300 font-mono" x-text="visibleData.length"></span> of <span class="text-slate-300 font-mono" x-text="filteredData.length"></span> rows (Page <span x-text="page"></span>/<span x-text="totalPages"></span>)</span>
                 <div class="flex gap-2">
-                    <button class="px-3 py-1 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50" disabled>Previous</button>
-                    <button class="px-3 py-1 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800">Next</button>
+                    <button class="px-3 py-1 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50" 
+                            @click="page > 1 ? page-- : null" :disabled="page === 1">Previous</button>
+                    <button class="px-3 py-1 border border-slate-700 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-50" 
+                            @click="page < totalPages ? page++ : null" :disabled="page >= totalPages">Next</button>
                 </div>
             </div>
         </div>
     </main>
 
-    <script>
-        // Initialize Icons
-        lucide.createIcons();
-
-        function dashboard() {
-            return {
-                searchQuery: '',
-                activeFilter: 'all',
-                sortKey: 'id',
-                sortAsc: true,
-                data: [],
-                files: { A: null, B: null },
-                processing: false,
-                error: null,
-                
-                init() {
-                    // Check if XLSX is loaded
-                    if (typeof XLSX === 'undefined') {
-                        this.error = "Library Excel parser failed to load. Please check your internet connection and refresh.";
-                    }
-                },
-
-                handleFileUpload(event, type) {
-                    this.error = null;
-                    const file = event.target.files[0];
-                    if (file) {
-                        this.files[type] = file;
-                    }
-                },
-
-                async processFiles() {
-                    if (!this.files.A || !this.files.B) return;
-                    
-                    this.processing = true;
-                    this.error = null;
-                    
-                    try {
-                        // Double check library
-                        if (typeof XLSX === 'undefined') {
-                            throw new Error("XLSX Library not loaded. Please refresh the page.");
-                        }
-
-                        const [dataA, dataB] = await Promise.all([
-                            this.readExcel(this.files.A),
-                            this.readExcel(this.files.B)
-                        ]);
-
-                        if (!dataA || dataA.length < 2) throw new Error("Workbook A is empty or invalid.");
-                        if (!dataB || dataB.length < 2) throw new Error("Workbook B is empty or invalid.");
-
-                        this.reconcileData(dataA, dataB);
-                    } catch (error) {
-                        console.error("Processing Error:", error);
-                        this.error = error.message || "An error occurred while processing files.";
-                    } finally {
-                        this.processing = false;
-                    }
-                },
-
-                readExcel(file) {
-                    return new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            try {
-                                const data = new Uint8Array(e.target.result);
-                                const workbook = XLSX.read(data, { type: 'array' });
-                                const firstSheetName = workbook.SheetNames[0];
-                                const worksheet = workbook.Sheets[firstSheetName];
-                                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Array of Arrays
-                                resolve(jsonData);
-                            } catch (err) {
-                                reject(err);
-                            }
-                        };
-                        reader.onerror = reject;
-                        reader.readAsArrayBuffer(file);
-                    });
-                },
-
-                reconcileData(rawA, rawB) {
-                    // Check headers
-                    if (!rawA[0] || !Array.isArray(rawA[0])) throw new Error("Workbook A has no valid header row.");
-                    if (!rawB[0] || !Array.isArray(rawB[0])) throw new Error("Workbook B has no valid header row.");
-
-                    // normalize headers
-                    const headersA = rawA[0].map(h => String(h || '').toLowerCase());
-                    const headersB = rawB[0].map(h => String(h || '').toLowerCase());
-                    
-                    const rowsA = rawA.slice(1);
-                    const rowsB = rawB.slice(1);
-
-                    const mapA = this.mapRows(rowsA, headersA, 'A');
-                    const mapB = this.mapRows(rowsB, headersB, 'B');
-
-                    if (mapA.size === 0) throw new Error("Could not find any valid data rows in Workbook A. Please check column names (ID, Date, Desc, Amount).");
-                    if (mapB.size === 0) throw new Error("Could not find any valid data rows in Workbook B. Please check column names (ID, Date, Desc, Amount).");
-
-                    // Merge Logic
-                    const allIds = new Set([...mapA.keys(), ...mapB.keys()]);
-                    const mergedData = [];
-
-                    allIds.forEach(id => {
-                        if(!id) return; // skip empty ids
-                        mergedData.push({
-                            id: id,
-                            a: mapA.get(id) || null,
-                            b: mapB.get(id) || null
-                        });
-                    });
-
-                    this.data = mergedData;
-                },
-
-                mapRows(rows, headers, sourceName) {
-                    const map = new Map();
-                    
-                    // Auto-detect columns indices
-                    // Expanded keywords for better matching
-                    const idxId = headers.findIndex(h => h.includes('id') || h.includes('ref') || h.includes('trx') || h.includes('code') || h.includes('nomor') || h.includes('unique'));
-                    const idxDate = headers.findIndex(h => h.includes('date') || h.includes('tanggal') || h.includes('waktu') || h.includes('time'));
-                    const idxDesc = headers.findIndex(h => h.includes('desc') || h.includes('ket') || h.includes('uraian') || h.includes('detail') || h.includes('name') || h.includes('nama'));
-                    const idxAmount = headers.findIndex(h => h.includes('amount') || h.includes('nominal') || h.includes('nilai') || h.includes('total') || h.includes('jumlah') || h.includes('harga') || h.includes('bayar'));
-
-                    // Fallback if detection fails
-                    // If we can't find columns, maybe try first 4 columns
-                    let finalId = idxId;
-                    let finalDate = idxDate;
-                    let finalDesc = idxDesc;
-                    let finalAmount = idxAmount;
-
-                    // If critical columns are missing, try default positions
-                    if (finalId === -1) finalId = 0;
-                    if (finalAmount === -1) {
-                         // Try to find a number column if amount keyword not found
-                         // This is hard without data, so just fallback to column 3 or last column
-                         finalAmount = headers.length > 3 ? 3 : headers.length - 1;
-                    }
-
-                    console.log(`Mapping ${sourceName}: ID=${finalId}, Date=${finalDate}, Desc=${finalDesc}, Amount=${finalAmount}`);
-
-                    rows.forEach((row, index) => {
-                        if (!row || row.length === 0) return;
-                        
-                        // ID is critical
-                        const id = String(row[finalId] || '').trim();
-                        if (!id || id.toLowerCase() === 'total' || id.toLowerCase() === 'grand total') return; // Skip total rows
-
-                        // Clean Amount
-                        let amount = row[finalAmount];
-                        // Handle accounting format (e.g. "(1,000)") or currency symbols
-                        if (typeof amount === 'string') {
-                            let cleanStr = amount.replace(/[^0-9.,-]/g, ""); // Keep only numbers, dots, commas, minus
-                            // Detect if comma is decimal or thousand separator
-                            // Simple assumption: if it has both . and ,, last one is decimal
-                            // Indonesian locale: 1.000,00 -> 1000.00
-                            // US locale: 1,000.00 -> 1000.00
-                            
-                            // Remove thousand separators if present
-                            // This is tricky. Let's try a simple approach: remove all non-numeric except . and -
-                            // Better approach: use a library or simple heuristic
-                            
-                            // Fallback: simple parse
-                            amount = parseFloat(amount.replace(/[^0-9.-]+/g,""));
-                        }
-                        
-                        if (amount === undefined || amount === null || isNaN(amount)) amount = 0;
-
-                        // Format Date
-                        let date = row[finalDate];
-                        if (typeof date === 'number') {
-                             // Excel date to JS date
-                             const dateObj = new Date(Math.round((date - 25569)*86400*1000));
-                             try {
-                                date = dateObj.toISOString().split('T')[0];
-                             } catch(e) {
-                                date = 'Invalid Date';
-                             }
-                        } else {
-                            date = String(date || '');
-                        }
-
-                        map.set(id, {
-                            date: date,
-                            desc: String(row[finalDesc] || ''),
-                            amount: amount
-                        });
-                    });
-
-                    return map;
-                },
-
-                generateMockData() {
-                    const baseData = [
-                        { id: 'TRX_22378848_001', a: { date: '2024-03-01', desc: 'Payment Gateway Settlement', amount: 1500000 }, b: { date: '2024-03-01', desc: 'Settlement #001', amount: 1500000 } }, // Match
-                        { id: 'TRX_22378848_002', a: { date: '2024-03-01', desc: 'Vendor Payment #A2', amount: 250000 }, b: { date: '2024-03-02', desc: 'Vendor Pay #A2', amount: 250000 } }, // Match (Diff Date ignored for logic, strict amount match)
-                        { id: 'TRX_22378848_003', a: { date: '2024-03-02', desc: 'Service Fee Q1', amount: 15000 }, b: { date: '2024-03-02', desc: 'Service Fee', amount: 10000 } }, // Mismatch
-                        { id: 'TRX_22378848_004', a: { date: '2024-03-02', desc: 'Refund Request #99', amount: -50000 }, b: null }, // Missing in B
-                        { id: 'TRX_22378848_005', a: null, b: { date: '2024-03-03', desc: 'Late Charge Adjustment', amount: 5000 } }, // Missing in A
-                        { id: 'TRX_22378848_006', a: { date: '2024-03-03', desc: 'Subscription Renewal', amount: 750000 }, b: { date: '2024-03-03', desc: 'Sub Renewal', amount: 750000 } },
-                        { id: 'TRX_22378848_007', a: { date: '2024-03-04', desc: 'Bulk Transfer Batch 1', amount: 5000000 }, b: { date: '2024-03-04', desc: 'Bulk Trf B1', amount: 4999500 } }, // Mismatch (small)
-                        { id: 'TRX_22378848_008', a: { date: '2024-03-04', desc: 'Tax Deduction', amount: 12500 }, b: { date: '2024-03-04', desc: 'Tax', amount: 12500 } },
-                    ];
-
-                    // Multiply data for density feel
-                    let extendedData = [...baseData];
-                    for(let i=0; i<3; i++) {
-                         baseData.forEach((item, idx) => {
-                             if(idx > 1) { // Skip some to keep unique IDs logic somewhat sane for mock
-                                 const newItem = JSON.parse(JSON.stringify(item));
-                                 newItem.id = newItem.id.replace(`_${idx+1}`, `_${idx+1}_C${i}`);
-                                 extendedData.push(newItem);
-                             }
-                         });
-                    }
-                    this.data = extendedData;
-                },
-
-                get filteredData() {
-                    return this.data.filter(row => {
-                        // Search Logic
-                        const searchLower = this.searchQuery.toLowerCase();
-                        const matchesSearch = row.id.toLowerCase().includes(searchLower) || 
-                                              (row.a && row.a.desc.toLowerCase().includes(searchLower)) || 
-                                              (row.b && row.b.desc.toLowerCase().includes(searchLower)) ||
-                                              (row.a && row.a.amount.toString().includes(searchLower));
-
-                        if (!matchesSearch) return false;
-
-                        // Tab Filter Logic
-                        const status = this.getStatus(row); // match, mismatch, missing_a, missing_b
-                        if (this.activeFilter === 'all') return true;
-                        if (this.activeFilter === 'match') return status === 'match';
-                        if (this.activeFilter === 'mismatch') return status === 'mismatch';
-                        if (this.activeFilter === 'missing') return status === 'missing_a' || status === 'missing_b';
-                        
-                        return true;
-                    }).sort((a, b) => {
-                        // Simple sort by ID
-                        return this.sortAsc ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
-                    });
-                },
-
-                get stats() {
-                    let totalA = 0;
-                    let totalB = 0;
-                    let mismatchCount = 0;
-                    let missingCount = 0;
-
-                    this.data.forEach(row => {
-                        const valA = row.a ? row.a.amount : 0;
-                        const valB = row.b ? row.b.amount : 0;
-                        
-                        totalA += valA;
-                        totalB += valB;
-
-                        const status = this.getStatus(row);
-                        if (status === 'mismatch') mismatchCount++;
-                        if (status === 'missing_a' || status === 'missing_b') missingCount++;
-                    });
-
-                    return {
-                        totalA,
-                        totalB,
-                        variance: totalA - totalB,
-                        mismatchCount,
-                        missingCount
-                    };
-                },
-
-                // --- Helpers ---
-
-                getVariance(row) {
-                    const valA = row.a ? row.a.amount : 0;
-                    const valB = row.b ? row.b.amount : 0;
-                    return valA - valB;
-                },
-
-                getStatus(row) {
-                    if (!row.a && row.b) return 'missing_a';
-                    if (row.a && !row.b) return 'missing_b';
-                    if (row.a.amount !== row.b.amount) return 'mismatch';
-                    return 'match';
-                },
-
-                // --- Styling Helpers ---
-
-                getAmountClass(row) {
-                    if (!row.b) return 'text-slate-700 italic';
-                    if (!row.a) return 'text-orange-400 font-bold'; // Highlight if extra in B
-                    if (row.a.amount !== row.b.amount) return 'text-red-400 font-bold bg-red-500/10 rounded px-1';
-                    return 'text-emerald-400';
-                },
-
-                getVarianceClass(row) {
-                    const v = this.getVariance(row);
-                    if (v === 0) return 'text-slate-600 opacity-50';
-                    return 'text-red-400';
-                },
-
-                getStatusBadgeClass(row) {
-                    const s = this.getStatus(row);
-                    if (s === 'match') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-                    if (s === 'mismatch') return 'bg-red-500/10 text-red-400 border-red-500/20';
-                    return 'bg-orange-500/10 text-orange-400 border-orange-500/20';
-                },
-
-                getStatusLabel(row) {
-                    const s = this.getStatus(row);
-                    if (s === 'match') return 'MATCHED';
-                    if (s === 'mismatch') return 'MISMATCH';
-                    if (s === 'missing_b') return 'NOT IN B';
-                    if (s === 'missing_a') return 'NOT IN A';
-                    return 'UNKNOWN';
-                },
-
-                sortBy(key) {
-                    if (this.sortKey === key) {
-                        this.sortAsc = !this.sortAsc;
-                    } else {
-                        this.sortKey = key;
-                        this.sortAsc = true;
-                    }
-                },
-
-                formatCurrency(value) {
-                    return new Intl.NumberFormat('id-ID').format(value);
-                },
-
-                formatVariance(value) {
-                    if (value === 0) return '-';
-                    const sign = value > 0 ? '+' : '';
-                    return sign + this.formatCurrency(value);
-                }
-            }
-        }
-    </script>
+    <script src="dashboard.js"></script>
 </body>
 </html>
